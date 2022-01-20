@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.7;
+pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
@@ -75,7 +75,7 @@ contract Market is Ownable {
         marketFeePercent = market_fee;
     }
 
-    function openMarket() external onlyOwner {
+    function openMarket() external {
         isMarketOpen = true;
     }
 

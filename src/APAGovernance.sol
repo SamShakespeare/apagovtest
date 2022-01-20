@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0
 
-pragma solidity >=0.7.0 <0.9.0;
+pragma solidity ^0.8.0;
 
 import "./Market.sol";
 
@@ -10,6 +10,29 @@ contract APAGovernance {
     Market immutable apaMkt;
     address immutable apaToken;
     address immutable apaMarket;//new testnet market address
+
+    event NewActiveProposal(
+        uint indexed id, 
+        uint end, 
+        uint ballotType, 
+        uint status,
+        address author, 
+        string name, 
+        string desc, 
+        string[] optionNames
+    );
+
+    event NewCertifiedProposal(
+        uint indexed id, 
+        uint end, 
+        uint ballotType, 
+        uint status,
+        address author, 
+        string name, 
+        string desc, 
+        uint[] optionVotes,
+        string[] optionNames        
+    );
 
     enum BallotType {perAPA, perAddress}
     enum Status { Active, Certified, FailedQuorum}
@@ -31,7 +54,7 @@ contract APAGovernance {
         uint numVotes;
         string name;
     }
- 
+     uint public lngth;
     address public manager;
     uint public proposerApas; 
     uint public quorumPerAPA;
@@ -67,7 +90,7 @@ contract APAGovernance {
     } 
 
     function setProposerApas(uint minApas) public onlyManager() {
-        require (minApas != 0, "set minimum to at least one APA ");
+        require (minApas >= 1 && minApas <= 9999, "APAs out of range");
         proposerApas = minApas;
     }
 
@@ -77,7 +100,7 @@ contract APAGovernance {
         string[] memory _optionNames,
         uint duration, //in days
         BallotType _ballotType //0=perAPA 1=perAddress
-    ) external {
+    ) external returns (uint){
 
         address proposer = msg.sender;
         uint numAPAs = apaContract.balanceOf(proposer);
@@ -99,7 +122,23 @@ contract APAGovernance {
         } else {
             proposals[nextPropId].quorum = quorumPerAddress;
         }
+
+        string[] memory optionNames = new string[](_optionNames.length);
+        optionNames = _optionNames;
+
+        emit NewActiveProposal(
+            proposals[nextPropId].id, 
+            proposals[nextPropId].end, 
+            uint(proposals[nextPropId].ballotType),
+            uint(proposals[nextPropId].status),
+            proposals[nextPropId].author, 
+            proposals[nextPropId].name, 
+            proposals[nextPropId].description,
+            optionNames
+        );
+
         nextPropId+=1;
+        return nextPropId-1;
     }
 
     function isLegendary(address _proposer) internal view returns (bool) {
@@ -118,19 +157,18 @@ contract APAGovernance {
         BallotType ballotType
     ) internal returns(uint256) {
         uint256 numOfVotes = 0;
-        uint currentAPA;
+        uint256 currentAPA;
 
         for(uint256 i=0; i < _voterBalance; i++){
-                //get current APA
+            //get current APA
             currentAPA = apaContract.tokenOfOwnerByIndex(_voter, i);
-            //check if APA has already voted
+            //check if APA has already voted          
             if(!votedAPAs[proposalId][currentAPA]){
-                //count APA as voted
                 if (ballotType == BallotType.perAddress) {
                     require(!voters[proposalId][_voter], "Voter has already voted");
                     return 1;
                 }
-                votedAPAs[proposalId][currentAPA] = true;
+               votedAPAs[proposalId][currentAPA] = true;
                 numOfVotes++;
             }
         }
@@ -190,16 +228,22 @@ contract APAGovernance {
         }
          
     }
-
+   
     function certifyResults(uint proposalId) external returns(Status) {
+         
         require(certifiers[msg.sender], "must be certifier to certify results");
         require(block.timestamp >= proposals[proposalId].end, "Proposal has not yet ended");
         require(proposals[proposalId].status == Status.Active, "Not an Active Proposal");
         bool quorumMet;
+        uint length = proposals[proposalId].options.length;
+        string[] memory _optionNames = new string[](length);
+        uint[] memory _optionVotes = new uint[](length);
 
-        for(uint i=0; i <= proposals[proposalId].options.length; i++){
+        for(uint i=0; i < length; i++){
             if(proposals[proposalId].options[i].numVotes >= proposals[nextPropId].quorum) 
                 quorumMet = true;
+            _optionNames[i] = proposals[proposalId].options[i].name;
+            _optionVotes[i] = proposals[proposalId].options[i].numVotes;
         }
 
         if(!quorumMet) 
@@ -207,11 +251,19 @@ contract APAGovernance {
         else 
             proposals[proposalId].status = Status.Certified;
 
+        emit NewCertifiedProposal(
+            proposals[proposalId].id, 
+            proposals[proposalId].end, 
+            uint(proposals[proposalId].ballotType),
+            uint(proposals[proposalId].status),
+            proposals[proposalId].author, 
+            proposals[proposalId].name, 
+            proposals[proposalId].description,
+            _optionVotes,
+            _optionNames            
+        );
+        
         return proposals[proposalId].status;
-    }
-
-    function getVoteCount(uint proposalId) external view returns(Option[] memory){
-        return proposals[proposalId].options;
     }
 
     function addCertifier(address newCertifier) external onlyManager(){
@@ -227,12 +279,12 @@ contract APAGovernance {
     }
 
     function setQuorumPerAPA(uint newQuorum) external onlyManager(){
-        require(newQuorum >= 1, "must have at least one winning vote");
+        require(newQuorum >= 1 && newQuorum <=9999, "APAs out of range");
         quorumPerAPA = newQuorum;
     }
 
     function setQuorumPerAddress(uint newQuorum) external onlyManager(){
-        require(newQuorum >= 1, "must have at least one winning vote");
+        require(newQuorum >= 1&& newQuorum <=9999, "APAs out of range");
         quorumPerAddress = newQuorum;
     }
 
@@ -254,4 +306,5 @@ contract APAGovernance {
 
         return _props;
     }
+
 }

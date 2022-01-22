@@ -4,6 +4,13 @@ pragma solidity  ^0.8.0;
 import "ds-test/test.sol";
 import "../APAGovernance.sol";
 import "./ERC721Mock.sol";
+import "./console.sol";
+
+interface HEVM {
+    function warp(uint256 time) external;
+    function prank(address sender) external;
+    function expectEmit(bool,bool,bool,bool) external;
+}
 
 enum BallotType {perAPA, perAddress}
 enum Status { Active, Certified, FailedQuorum}    
@@ -27,10 +34,34 @@ struct Proposal {
     }
 
 contract APAGovernanceTest is DSTest {
+    HEVM private hevm = HEVM(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
     APAGovernance private apaGov;
     Market private apaMkt;
     ERC721Mock private mockToken;
     address owner;
+
+    event NewActiveProposal(
+        uint indexed id, 
+        uint end, 
+        uint ballotType, 
+        uint status,
+        address author, 
+        string name, 
+        string desc, 
+        string[] optionNames
+    );
+
+    event NewCertifiedProposal(
+        uint indexed id, 
+        uint end, 
+        uint ballotType, 
+        uint status,
+        address author, 
+        string name, 
+        string desc, 
+        uint[] optionVotes,
+        string[] optionNames        
+    );
 
     function setUp() public {
         
@@ -42,9 +73,12 @@ contract APAGovernanceTest is DSTest {
             address(mockToken),  //apatoken testnet address
             address(apaMkt), //apaMarket testnet address
             30,                                         //proposer APAs
-            200,                                        //quorum per apa
-            40                                         //quorum per address
+            40,                                        //quorum per address
+            200                                         //quorum per apa
         );
+
+        //add a certifier
+        apaGov.addCertifier(owner);
 
         //mint some nfts
         for(uint i = 0; i<=30; i++){
@@ -114,33 +148,174 @@ contract APAGovernanceTest is DSTest {
             APAGovernance.BallotType.perAddress //0=perAPA 1=perAddress
             );
         assertEq(proposalId, 3);
+    }
+
+    function testEmitNewActiveProposalEvent() public {
+        string[] memory _options  = new string[](4);
+        _options[0] = ("option A");
+        _options[1] = ("option B");
+        _options[2] = ("option C");
+        _options[3] = ("option D");
+
+
+        hevm.expectEmit(true,true,false,true);
+        emit NewActiveProposal(
+            2, 
+            259200, 
+            uint(APAGovernance.BallotType.perAPA),
+            uint(APAGovernance.Status.Active),
+            owner, 
+            "Proposal 3", 
+            "Description 3",
+            _options            
+        );
+
+        uint proposalId = apaGov.createProposal(
+            "Proposal 3", 
+            "Description 3",
+            _options,
+            3, //in days
+            APAGovernance.BallotType.perAPA //0=perAPA 1=perAddress
+            );
+        assertEq(proposalId, 2);
+    }
+
+    function testEmitCertifiedEvent() public {
+        string[] memory _options  = new string[](4);
+        _options[0] = ("option A");
+        _options[1] = ("option B");
+        _options[2] = ("option C");
+        _options[3] = ("option D");
+
+        uint[] memory _optionVotes = new uint[](4);
+        _optionVotes[0] = 0;
+        _optionVotes[1] = 1;
+        _optionVotes[2] = 0;
+        _optionVotes[3] = 0;
+
+        apaGov.vote(1, 1);
+        apaGov.setQuorumPerAddress(1);
+        hevm.warp(4 days);
+
+        hevm.expectEmit(true,true,false,true);
+        emit NewCertifiedProposal(
+            1, 
+            259200, 
+            uint(APAGovernance.BallotType.perAddress),
+            uint(APAGovernance.Status.Certified),
+            owner, 
+            "Proposal 2", 
+            "Description 2",
+            _optionVotes,
+            _options            
+        );
+        apaGov.certifyResults(1);
+    }
+
+     //test getProposals() with 500 proposals
+    function testGetProposals() public {
+        uint lastPropId;
+        //prepopulate proposal array with 500 samples
+        for(uint i=0; i < 500; i++){
+            string[] memory _options = new string[](3);
+            _options[0] = ("option 1");
+            _options[1] = ("option 2");
+            _options[2] = ("option 3");
+       
+        lastPropId = apaGov.createProposal(
+            "Proposal 3", 
+            "Description 3",
+            _options,
+            3, //in days
+            APAGovernance.BallotType.perAPA //0=perAPA 1=perAddress
+            );
+
+        }
+        assertEq(lastPropId, 501);//2 created during setup()
+        console.log("lastPropId: ",lastPropId);
 
         //test getProposals()
         APAGovernance.Proposal[] memory proposals = new APAGovernance.Proposal[](3);
+        uint p=3;
         proposals = apaGov.getProposals();
         assertEq(proposals.length,apaGov.nextPropId());
-        assertEq(proposals[1].quorum, 200);
-        assertEq(proposals[2].quorum, 40);
-        assertEq(proposals[2].options[1].id, 1);
-        assertEq(proposals[1].author, owner);
+        assertEq(proposals[1].quorum, 40);
+        assertEq(proposals[p].options.length, 3);
+        assertEq(proposals[p].options[1].id, 1);
+        assertEq(proposals[p].author, owner);
+        assertTrue(proposals[p].ballotType == APAGovernance.BallotType.perAPA);
+
+        //vote for 500 proposals
+        for(uint i=0; i < 500; i++){
+            apaGov.vote(i, 2);
+        }
+
+        proposals = apaGov.getProposals();
+        assertEq(proposals.length,apaGov.nextPropId());
     }
     
     function testVote() public {
         uint propId = 0;
         uint optionId = 2;
-
-        //add some listings to apa market
+        uint currBalance = mockToken.balanceOf(owner);
         require(apaMkt.isMarketOpen()==true,"Market Closed");
-        //apaGov.vote(propId, optionId);
-        
-        //assertEq(apaGov.numOfVotes(),mockToken.balanceOf(owner) );
 
-     //   APAGovernance.Proposal[] memory proposals = new APAGovernance.Proposal[](3);
-     //   proposals = apaGov.getProposals();
-        //assertEq(proposals[propId].options[optionId].numVotes, mockToken.balanceOf(owner));
+        apaGov.vote(propId, 2);
+
+        //make sure all votes have been counted
+        for(uint i = 0; i< currBalance-1; i++){
+            assertTrue(apaGov.votedAPAs(propId, mockToken.tokenOfOwnerByIndex(owner, i)));
+        }
+
+    } 
+
+    function testCertifyResults() public {
+        assertTrue(apaGov.certifiers(owner));
+        APAGovernance.Status status;
+
+        string[] memory _options = new string[](3);
+            _options[0] = ("option 1");
+            _options[1] = ("option 2");
+            _options[2] = ("option 3");
+       
+        uint lastPropId = apaGov.createProposal(
+            "Proposal 3", 
+            "Description 3",
+            _options,
+            3, //in days
+            APAGovernance.BallotType.perAPA //0=perAPA 1=perAddress
+            );
+
+            
+        APAGovernance.Proposal[] memory proposals = new APAGovernance.Proposal[](3);
+        proposals = apaGov.getProposals();
         
+        uint prevTime = block.timestamp;
+        hevm.warp(4 days);
+        assertTrue(block.timestamp == prevTime + 4 days);
+        assertEq(lastPropId, 2);
+        assertEq(lastPropId, apaGov.nextPropId()-1);
+        assertEq(proposals[lastPropId].options.length,3);
+
+        status = apaGov.certifyResults(lastPropId);
+        assertTrue(status == APAGovernance.Status.Certified);
+
+        //check status
+        proposals = apaGov.getProposals();
+        assertTrue(proposals[lastPropId].status == APAGovernance.Status.Certified);
+
     }
-    
+
+    function testFailCertifyIfNotCertifier() public {
+        hevm.prank(address(1));
+        hevm.warp(4 days);
+        apaGov.certifyResults(1);
+    }
+
+    function testFailCertifyIfProposalNotEnded() public {
+        hevm.warp(1 days);
+        apaGov.certifyResults(1);
+    }
     
     //test setProposerAPA()
     function testProposerApas() public {
@@ -176,10 +351,15 @@ contract APAGovernanceTest is DSTest {
         }
     }
     function testFailSetQuorumPerAddressLow() public {
-            apaGov.setQuorumPerAddress(0);
+        apaGov.setQuorumPerAddress(0);
     }
     function testFailSetQuorumPerAddressHi() public {
-            apaGov.setQuorumPerAddress(10005);
+        apaGov.setQuorumPerAddress(10005);
+    }
+
+    function testFailSetQuorumIfNotManager() public {
+        hevm.prank(address(1));
+        apaGov.setQuorumPerAddress(50);
     }
    
 }

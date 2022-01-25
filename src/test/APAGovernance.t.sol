@@ -40,27 +40,39 @@ contract APAGovernanceTest is DSTest {
     ERC721Mock private mockToken;
     address owner;
 
-    event NewActiveProposal(
-        uint indexed id, 
-        uint end, 
-        uint ballotType, 
+    event ProposalCreated(
+        uint indexed propId, 
+        uint end,
+        uint quorum,
+        uint numOptions,
+        uint ballotType,
         uint status,
         address author, 
         string name, 
-        string desc, 
-        string[] optionNames
+        string desc
     );
 
-    event NewCertifiedProposal(
-        uint indexed id, 
-        uint end, 
-        uint ballotType, 
-        uint status,
-        address author, 
-        string name, 
-        string desc, 
-        uint[] optionVotes,
-        string[] optionNames        
+    event ProposalStatusUpdated(
+        uint indexed propId, 
+        uint status     
+    );
+
+    event ProposalVotesUpdated(
+        uint indexed propId,
+        uint indexed optionId, 
+        uint numVotes   
+    );
+
+    event OptionCreated(
+        uint indexed propId,
+        uint indexed optionId,
+        uint numVotes,
+        string name
+    );
+
+    event QuorumByProposalUpdated(
+        uint indexed propId,
+        uint newQuorum
     );
 
     function setUp() public {
@@ -148,68 +160,6 @@ contract APAGovernanceTest is DSTest {
             APAGovernance.BallotType.perAddress //0=perAPA 1=perAddress
             );
         assertEq(proposalId, 3);
-    }
-
-    function testEmitNewActiveProposalEvent() public {
-        string[] memory _options  = new string[](4);
-        _options[0] = ("option A");
-        _options[1] = ("option B");
-        _options[2] = ("option C");
-        _options[3] = ("option D");
-
-
-        hevm.expectEmit(true,true,false,true);
-        emit NewActiveProposal(
-            2, 
-            259200, 
-            uint(APAGovernance.BallotType.perAPA),
-            uint(APAGovernance.Status.Active),
-            owner, 
-            "Proposal 3", 
-            "Description 3",
-            _options            
-        );
-
-        uint proposalId = apaGov.createProposal(
-            "Proposal 3", 
-            "Description 3",
-            _options,
-            3, //in days
-            APAGovernance.BallotType.perAPA //0=perAPA 1=perAddress
-            );
-        assertEq(proposalId, 2);
-    }
-
-    function testEmitCertifiedEvent() public {
-        string[] memory _options  = new string[](4);
-        _options[0] = ("option A");
-        _options[1] = ("option B");
-        _options[2] = ("option C");
-        _options[3] = ("option D");
-
-        uint[] memory _optionVotes = new uint[](4);
-        _optionVotes[0] = 0;
-        _optionVotes[1] = 1;
-        _optionVotes[2] = 0;
-        _optionVotes[3] = 0;
-
-        apaGov.vote(1, 1);
-        apaGov.setQuorumPerAddress(1);
-        hevm.warp(4 days);
-
-        hevm.expectEmit(true,true,false,true);
-        emit NewCertifiedProposal(
-            1, 
-            259200, 
-            uint(APAGovernance.BallotType.perAddress),
-            uint(APAGovernance.Status.Certified),
-            owner, 
-            "Proposal 2", 
-            "Description 2",
-            _optionVotes,
-            _options            
-        );
-        apaGov.certifyResults(1);
     }
 
      //test getProposals() with 500 proposals
@@ -360,6 +310,83 @@ contract APAGovernanceTest is DSTest {
     function testFailSetQuorumIfNotManager() public {
         hevm.prank(address(1));
         apaGov.setQuorumPerAddress(50);
+    }
+
+    //test event emits
+    function testEmitProposalCreatedEvent() public {
+        string[] memory _options  = new string[](4);
+        _options[0] = ("option A");
+        _options[1] = ("option B");
+        _options[2] = ("option C");
+        _options[3] = ("option D");
+
+
+        hevm.expectEmit(true,false,false,true);
+        
+        emit ProposalCreated(
+            2, 
+            259200, 
+            200,
+            4,
+            uint(APAGovernance.BallotType.perAPA),
+            uint(APAGovernance.Status.Active),
+            owner, 
+            "Proposal 3", 
+            "Description 3"         
+        );
+
+        uint proposalId = apaGov.createProposal(
+            "Proposal 3", 
+            "Description 3",
+            _options,
+            3, //in days
+            APAGovernance.BallotType.perAPA //0=perAPA 1=perAddress
+            );
+        assertEq(proposalId, 2);
+    }
+
+    function testEmitProposalStatusUpdatedEvent() public {
+        apaGov.vote(1, 1);
+        apaGov.setQuorumPerAddress(1);
+        hevm.warp(4 days);
+        hevm.expectEmit(true,false,false,true);
+        emit ProposalStatusUpdated(1,uint(APAGovernance.Status.Certified));
+        apaGov.certifyResults(1);
+    }
+
+    function testEmitProposalVotesUpdatedEvent() public {
+        hevm.expectEmit(true,true,false,true);
+        emit ProposalVotesUpdated(1,1,1);
+        apaGov.vote(1, 1);
+
+        hevm.expectEmit(true,true,false,true);
+        emit ProposalVotesUpdated(0,1,32);
+        apaGov.vote(0, 1);
+    }
+
+    function testEmitQuorumByProposalUpdatedEvent() public {
+        hevm.expectEmit(true,false,false,true);
+        emit QuorumByProposalUpdated(0,10);
+        apaGov.setQuorumByProposal(0,10);
+    }
+
+    function testOptionCreatedEvent() public {
+        string[] memory _options  = new string[](4);
+        _options[0] = ("option A");
+        _options[1] = ("option B");
+        _options[2] = ("option C");
+        _options[3] = ("option D");
+
+        hevm.expectEmit(true,true,false,true);
+        emit OptionCreated(2,0,0,_options[0]);
+        uint proposalId = apaGov.createProposal(
+            "Proposal 3", 
+            "Description 3",
+            _options,
+            3, //in days
+            APAGovernance.BallotType.perAPA //0=perAPA 1=perAddress
+            );
+        assertEq(proposalId, 2);
     }
    
 }
